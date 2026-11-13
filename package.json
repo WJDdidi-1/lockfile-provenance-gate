@@ -1,0 +1,20 @@
+{
+  "name": "lockfile-provenance-gate",
+  "version": "0.1.0",
+  "description": "Gate npm lockfiles on provenance bound to the repo you actually trust.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "lockfile-provenance-gate": "./bin/lockfile-provenance-gate.mjs"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WJDdidi-1/lockfile-provenance-gate.git"
+  }
+}
