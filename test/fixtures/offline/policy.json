@@ -2,6 +2,7 @@
   "mode": "allowlist",
   "sourceRepository": "https://github.com/acme/widget",
   "workflow": ".github/workflows/release.yml",
+  "trustRoot": "../bundles/trust-root.json",
   "allowlist": [
     {
       "name": "@acme/widget",
