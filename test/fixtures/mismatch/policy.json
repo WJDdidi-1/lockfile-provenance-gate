@@ -1,0 +1,12 @@
+{
+  "mode": "allowlist",
+  "sourceRepository": "https://github.com/acme/pinned",
+  "workflow": ".github/workflows/release.yml",
+  "allowlist": [
+    {
+      "name": "pinned",
+      "version": "2.0.0",
+      "integrity": "sha512-K/hGvkm8IgmNmU7EHrBX705kC7rAN7G/mQ//pJGP570lWSvuYzvinhvIb6rsmARX8AKLR9qam8KxmDuU/sgHfQ=="
+    }
+  ]
+}
