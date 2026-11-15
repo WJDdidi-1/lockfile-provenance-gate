@@ -39,6 +39,16 @@ npx lockfile-provenance-gate --help
 
 Both `lockfile-provenance-gate` and the shorter `provenance-gate` are installed and invoke the same CLI. Examples below use `provenance-gate`.
 
+## Runnable examples
+
+[`examples/`](examples/) contains two self-contained, offline walkthroughs: one package that passes, and one whose validly signed *publish* attestation is not build provenance (exit 1). From a clone, with no install and no network:
+
+```sh
+npm run example
+```
+
+The runner asserts both documented exit codes, so the examples cannot silently drift. Each directory has its own lockfile, policy, and cache; see [examples/README.md](examples/README.md) for the full output and how to adapt the policy to your own lockfile. The bundles are generated test data, not real registry attestations, and the fixture trust root must not be used in production.
+
 ## Quick start: a real check session
 
 The repository ships generated, Sigstore-style test bundles signed by a throwaway fixture PKI. They are **test data, not real registry attestations**. From a clone of this repository, this succeeds offline:
@@ -240,7 +250,7 @@ The receipt also carries `lockfile`, `policy`, `registry`, and `lockfileVersion`
 npm test
 ```
 
-The suite uses Node's built-in test runner and generated fixtures, including a local HTTP server for cache tests. It does not require network access. CI runs on Ubuntu, macOS, and Windows with Node 18, 20, and 22, then packs the tarball and installs it in a clean directory to run both binaries with `--version` and `--help`.
+The suite uses Node's built-in test runner and generated fixtures, including a local HTTP server for cache tests. It does not require network access. It also runs the checked-in examples, so their documented exit codes are part of `npm test`. CI runs on Ubuntu, macOS, and Windows with Node 18, 20, and 22, then packs the tarball and installs it in a clean directory to run both binaries with `--version` and `--help`.
 
 ## Status
 
