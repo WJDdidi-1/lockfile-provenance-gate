@@ -8,14 +8,31 @@
     "lockfile-provenance-gate": "./bin/lockfile-provenance-gate.mjs",
     "provenance-gate": "./bin/provenance-gate.js"
   },
+  "files": [
+    "bin/",
+    "lib/"
+  ],
   "scripts": {
     "test": "node --test"
   },
+  "keywords": [
+    "npm",
+    "lockfile",
+    "provenance",
+    "sigstore",
+    "supply-chain",
+    "security",
+    "attestation"
+  ],
   "engines": {
     "node": ">=18"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/WJDdidi-1/lockfile-provenance-gate.git"
+  },
+  "homepage": "https://github.com/WJDdidi-1/lockfile-provenance-gate#readme",
+  "bugs": {
+    "url": "https://github.com/WJDdidi-1/lockfile-provenance-gate/issues"
   }
 }
