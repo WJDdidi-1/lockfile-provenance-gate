@@ -237,6 +237,78 @@ The receipt also carries `lockfile`, `policy`, `registry`, and `lockfileVersion`
 | `1` | Policy failure: missing attestation, digest mismatch, integrity-pin mismatch, or source repository/workflow mismatch. |
 | `2` | The check could not complete: malformed input, corrupt cache, unreachable registry, or signature/certificate verification failure. |
 
+## FAQ
+
+### Which lockfiles can it read?
+
+`package-lock.json` v1, v2, and v3 only. `yarn.lock`, `pnpm-lock.yaml`, and a bare `node_modules` tree are not supported. Pass the lockfile explicitly:
+
+```sh
+provenance-gate check package-lock.json --policy provenance.json --cache .provenance-cache
+```
+
+### Does it need network access?
+
+With `--cache`, an online run fetches attestations that are not already cached and writes the exact Sigstore trust root it used into the cache directory. Later runs with `--offline` and the same cache make no network calls. From a clone, this succeeds offline against the checked-in example and exits 0:
+
+```sh
+node bin/provenance-gate.js check examples/offline-check/package-lock.json \
+  --policy examples/offline-check/provenance.json \
+  --cache examples/offline-check/cache \
+  --offline
+```
+
+If a required bundle is absent from the cache, `--offline` reports `missing` (exit 1) instead of fetching it.
+
+### Why does a package fail even though npmjs.com shows a provenance badge?
+
+The badge reflects npm's provenance check for that version. It does not answer whether the attestation names the upstream repository and workflow your policy trusts, or whether its subject digest matches your lockfile entry. Add `--json` to see the per-package `status` and `reason`:
+
+```sh
+provenance-gate check package-lock.json --policy provenance.json --cache .provenance-cache --offline --json
+```
+
+A validly signed npm *publish* attestation is not build provenance and also cannot satisfy the policy; only SLSA/provenance predicates can.
+
+### How do I exempt a package that has no provenance?
+
+Add an exemption with a non-empty `reason`. In allowlist mode, list the package in `allowlist` too so it is selected:
+
+```json
+{
+  "mode": "allowlist",
+  "sourceRepository": "https://github.com/acme/widget",
+  "workflow": ".github/workflows/release.yml",
+  "allowlist": [
+    { "name": "@acme/widget", "version": "1.2.3" },
+    { "name": "legacy-tool", "version": "4.2.0" }
+  ],
+  "exemptions": [
+    {
+      "package": "legacy-tool",
+      "version": "4.2.0",
+      "reason": "Upstream publishes no provenance; tarball reviewed 2026-01-15"
+    }
+  ]
+}
+```
+
+Exempt requirements count in `summary.exempt` and exit 0; they do not print a verdict row.
+
+### Can it block `npm ci`?
+
+Not through an npm lifecycle hook. It is a separate CLI, so run it as a step before install, or chain it so the exit code stops the job:
+
+```sh
+provenance-gate check package-lock.json --policy provenance.json --cache .provenance-cache --offline && npm ci
+```
+
+Exit `1` means a package does not meet the policy; exit `2` means the gate could not complete. The gate never installs, unpacks, or executes the audited packages.
+
+### Does it verify a full Rekor inclusion proof?
+
+No. It verifies the Rekor signed entry timestamp (SET) and, when present, its payload hash against the DSSE payload, but it does not fetch or verify a Merkle inclusion proof. See [What a run verifies](#what-a-run-verifies).
+
 ## Security notes
 
 - Provenance is only as strong as the trust root and policy you supply. Set `sourceRepository` and `workflow`; without them the gate still verifies that a valid attestation covers the lockfile digest, but it cannot tell you *who* built it.
