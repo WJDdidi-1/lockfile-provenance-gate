@@ -41,14 +41,19 @@ jobs:
           npm pack --pack-destination dist
           tar -tzf dist/*.tgz > files.txt
           ! grep -E '(^|/)(\.env|\.npmrc|id_rsa|credentials\.json|\.dsh)(/|$)' files.txt
+          ! grep -E '(^|/)(test|scripts|\.github)/' files.txt
           node -e "const p=require('./package.json'); if(!p.name||!p.version||!p.license) process.exit(1)"
-      - name: install the tarball in a clean directory
+      - name: install the tarball in a clean directory and run both binaries
         run: |
           set -euo pipefail
           mkdir -p smoke && cd smoke
           npm init -y >/dev/null
-          npm install ../dist/*.tgz
-          node -e "const p=require('../package.json'); const bin=Object.values(p.bin||{})[0]; if(!bin) process.exit(0); require('child_process').execFileSync(process.execPath, ['../'+bin, '--version'], {stdio:'inherit'})"
+          npm install --ignore-scripts --no-audit --no-fund ../dist/*.tgz
+          version="$(node -p "require('../package.json').version")"
+          for bin in lockfile-provenance-gate provenance-gate; do
+            test "$(./node_modules/.bin/$bin --version)" = "$version"
+            ./node_modules/.bin/$bin --help | grep -q -- '--offline'
+          done
       - name: every CI job on this commit must be green
         if: startsWith(github.ref, 'refs/tags/')
         env:
