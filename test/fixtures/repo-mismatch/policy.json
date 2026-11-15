@@ -1,0 +1,12 @@
+{
+  "mode": "allowlist",
+  "sourceRepository": "https://github.com/acme/gamma",
+  "workflow": ".github/workflows/release.yml",
+  "trustRoot": "../bundles/trust-root.json",
+  "allowlist": [
+    {
+      "name": "beta",
+      "version": "0.9.0"
+    }
+  ]
+}

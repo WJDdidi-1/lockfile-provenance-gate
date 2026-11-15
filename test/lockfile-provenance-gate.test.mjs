@@ -10,7 +10,9 @@ test('--version prints the package version', () => {
   if (!/^\d+\.\d+\.\d+/.test(out.trim())) throw new Error('unexpected version: ' + out);
 });
 
-test('--help names the tool and its MVP', () => {
+test('--help names the tool and the offline cache options', () => {
   const out = execFileSync(process.execPath, [bin, '--help'], { encoding: 'utf8' });
   if (!out.includes('lockfile-provenance-gate')) throw new Error('help does not name the tool');
+  if (!out.includes('--cache')) throw new Error('help does not document --cache');
+  if (!out.includes('--offline')) throw new Error('help does not document --offline');
 });
