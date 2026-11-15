@@ -1,0 +1,15 @@
+{
+  "mode": "allowlist",
+  "sourceRepository": "https://github.com/acme/example",
+  "workflow": ".github/workflows/release.yml",
+  "allowlist": [
+    "alpha@1.2.3"
+  ],
+  "exemptions": [
+    {
+      "package": "alpha",
+      "version": "1.2.3",
+      "reason": "vendored with a reviewed patch in this repository"
+    }
+  ]
+}

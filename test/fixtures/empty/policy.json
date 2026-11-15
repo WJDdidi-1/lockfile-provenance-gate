@@ -1,0 +1,5 @@
+{
+  "mode": "all",
+  "sourceRepository": "https://github.com/acme/example",
+  "workflow": ".github/workflows/release.yml"
+}

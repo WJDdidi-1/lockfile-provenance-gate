@@ -5,7 +5,8 @@
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
-    "lockfile-provenance-gate": "./bin/lockfile-provenance-gate.mjs"
+    "lockfile-provenance-gate": "./bin/lockfile-provenance-gate.mjs",
+    "provenance-gate": "./bin/provenance-gate.js"
   },
   "scripts": {
     "test": "node --test"
