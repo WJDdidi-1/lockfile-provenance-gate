@@ -1,0 +1,11 @@
+{
+  "mode": "allowlist",
+  "sourceRepository": "https://github.com/acme/widget",
+  "workflow": ".github/workflows/release.yml",
+  "allowlist": [
+    {
+      "name": "publish-only",
+      "version": "1.0.0"
+    }
+  ]
+}
