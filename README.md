@@ -163,6 +163,8 @@ An exemption is the only way to make a required package pass without provenance,
 
 The policy is validated strictly: a malformed URL, an empty allowlist, an unknown mode, or an exemption without a reason is an error rather than a silently weaker gate. Common alternate spellings are accepted for compatibility, but the canonical form above is what the examples and tests use.
 
+If an explicitly allowlisted package is present in the lockfile but excluded by a dependency-type filter (`includeDev`, `includeOptional`, or `includePeer` set to `false`), the check still exits 1, but the receipt says the package was excluded by that filter instead of claiming it is not in the lockfile.
+
 ## What a run verifies
 
 For every selected lockfile entry, the tool:

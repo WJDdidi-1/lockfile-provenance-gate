@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
@@ -17,18 +18,15 @@ function fixture(name, file) {
   return path.join(root, 'test', 'fixtures', name, file);
 }
 
-function runCheck(name, extra = []) {
-  const args = [
-    bin,
-    'check',
-    fixture(name, 'package-lock.json'),
-    '--policy',
-    fixture(name, 'policy.json'),
-    '--offline',
-  ];
+function runCheckAt(lockfilePath, policyPath, extra = []) {
+  const args = [bin, 'check', lockfilePath, '--policy', policyPath, '--offline'];
   if (!extra.includes('--cache')) args.push('--cache', bundles);
   args.push(...extra);
   return spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 20000 });
+}
+
+function runCheck(name, extra = []) {
+  return runCheckAt(fixture(name, 'package-lock.json'), fixture(name, 'policy.json'), extra);
 }
 
 function receiptOf(result) {
@@ -160,6 +158,105 @@ test('a required package with no cached bundle is missing, not unverified', () =
     error: 0,
     exempt: 0,
   });
+});
+
+test('a required dev dependency excluded by includeDev is reported as filtered, not absent', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'provenance-gate-includedev-'));
+  try {
+    const lockfilePath = path.join(dir, 'package-lock.json');
+    writeFileSync(
+      lockfilePath,
+      JSON.stringify({
+        name: 'include-dev-fixture',
+        version: '1.0.0',
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          '': {
+            name: 'include-dev-fixture',
+            version: '1.0.0',
+            devDependencies: { 'dev-tool': '0.20.10' },
+          },
+          'node_modules/dev-tool': {
+            version: '0.20.10',
+            resolved: 'https://registry.npmjs.org/dev-tool/-/dev-tool-0.20.10.tgz',
+            integrity:
+              'sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==',
+            dev: true,
+          },
+        },
+      }),
+    );
+    const policyPath = path.join(dir, 'policy.json');
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        mode: 'allowlist',
+        sourceRepository: 'https://github.com/acme/example',
+        workflow: '.github/workflows/release.yml',
+        includeDev: false,
+        allowlist: [{ name: 'dev-tool', version: '0.20.10' }],
+      }),
+    );
+
+    const result = runCheckAt(lockfilePath, policyPath, ['--json']);
+    assert.equal(result.status, 1, result.stderr);
+
+    const receipt = receiptOf(result);
+    const row = rowFor(receipt, 'dev-tool');
+    assert.equal(row.status, 'missing');
+    assert.match(row.reason, /in the lockfile but excluded because includeDev=false/u);
+    assert.match(row.reason, /it is a dev dependency/u);
+    assert.doesNotMatch(row.reason, /not present in the lockfile/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a genuinely absent requirement is still reported as not present when includeDev is false', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'provenance-gate-absent-'));
+  try {
+    const lockfilePath = path.join(dir, 'package-lock.json');
+    writeFileSync(
+      lockfilePath,
+      JSON.stringify({
+        name: 'absent-fixture',
+        version: '1.0.0',
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          '': { name: 'absent-fixture', version: '1.0.0' },
+          'node_modules/dev-tool': {
+            version: '0.20.10',
+            resolved: 'https://registry.npmjs.org/dev-tool/-/dev-tool-0.20.10.tgz',
+            dev: true,
+          },
+        },
+      }),
+    );
+    const policyPath = path.join(dir, 'policy.json');
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        mode: 'allowlist',
+        sourceRepository: 'https://github.com/acme/example',
+        workflow: '.github/workflows/release.yml',
+        includeDev: false,
+        allowlist: [{ name: 'absent-tool', version: '1.0.0' }],
+      }),
+    );
+
+    const result = runCheckAt(lockfilePath, policyPath, ['--json']);
+    assert.equal(result.status, 1, result.stderr);
+
+    const receipt = receiptOf(result);
+    const row = rowFor(receipt, 'absent-tool');
+    assert.equal(row.status, 'missing');
+    assert.match(row.reason, /which is not present in the lockfile/u);
+    assert.doesNotMatch(row.reason, /includeDev/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('offline verification never falls back to the network when the cache is absent', () => {
