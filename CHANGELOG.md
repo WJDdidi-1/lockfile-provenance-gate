@@ -18,8 +18,9 @@ All notable changes to this project are documented in this file.
   and the receipt use. The integrity hash still binds the verdict to the aliased
   tarball.
 - `npm test` now packs the tarball, installs it in a clean directory, and has
-  the installed CLI verify an aliased project (exit 0) and an integrity
-  mismatch (exit 1).
+  the installed CLI verify an aliased project (exit 0) both when the policy
+  names the real package and when it names the local alias, and report a
+  tampered integrity hash as a mismatch (exit 1).
 
 ## 0.1.1 - 2026-11-16
 
