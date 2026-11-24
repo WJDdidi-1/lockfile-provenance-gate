@@ -274,7 +274,7 @@ Yes. An npm alias installs a package under a different local name:
 }
 ```
 
-Prefer the real package name in the policy. Naming the local alias (`cv`) also selects the aliased entry, but the receipt and the attestation always use the real package (`cache-verdict`), so the real name is clearer and survives an alias rename. Either way, the integrity hash binds the verdict to the exact tarball installed under the alias, so a wrong or tampered hash is a mismatch (exit 1). Both `package-lock.json` v1 aliases (where the `npm:` spec is in `version`) and v2/v3 aliases (where `packages[*].name` carries the real name) are handled. The packed-tarball test and [`examples/alias-check`](examples/alias-check) exercise this end to end.
+Prefer the real package name in the policy. Naming the local alias (`cv`) also selects the aliased entry, but the receipt and the attestation always use the real package (`cache-verdict`), so the real name is clearer and survives an alias rename. Either way, the integrity hash binds the verdict to the exact tarball installed under the alias, so a wrong or tampered hash is a mismatch (exit 1). Both `package-lock.json` v1 aliases (where the `npm:` spec is in `version`) and v2/v3 aliases (where `packages[*].name` carries the real name) are handled. The packed-tarball test checks both policy spellings against a clean install, and [`examples/alias-check`](examples/alias-check) exercises the real-package spelling offline.
 
 ### Does it need network access?
 
@@ -351,7 +351,7 @@ No. It verifies the Rekor signed entry timestamp (SET) and, when present, its pa
 npm test
 ```
 
-The suite uses Node's built-in test runner and generated fixtures, including a local HTTP server for cache tests. It does not require network access. It also runs the checked-in examples, so their documented exit codes are part of `npm test`, packs the tarball, installs it in a clean directory, and has the installed CLI verify an aliased lockfile (exit 0) and a tampered integrity hash (exit 1). CI runs on Ubuntu, macOS, and Windows with Node 18, 20, and 22, then packs the tarball and installs it in a clean directory to run both binaries with `--version` and `--help`.
+The suite uses Node's built-in test runner and generated fixtures, including a local HTTP server for cache tests. It does not require network access. It also runs the checked-in examples, so their documented exit codes are part of `npm test`, packs the tarball, installs it in a clean directory, and has the installed CLI verify an aliased project (exit 0) both when the policy names the real package and when it names the local alias, then report a tampered integrity hash as a mismatch (exit 1). CI runs on Ubuntu, macOS, and Windows with Node 18, 20, and 22, then packs the tarball and installs it in a clean directory to run both binaries with `--version` and `--help`.
 
 ## Status
 
