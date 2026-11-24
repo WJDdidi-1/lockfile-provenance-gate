@@ -200,7 +200,7 @@ Add `--json` to get a machine-readable receipt on stdout:
 {
   "schemaVersion": 1,
   "tool": "lockfile-provenance-gate",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "generatedAt": "2026-01-15T12:00:00.000Z",
   "ok": true,
   "exitCode": 0,
