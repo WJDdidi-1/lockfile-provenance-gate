@@ -41,13 +41,13 @@ Both `lockfile-provenance-gate` and the shorter `provenance-gate` are installed 
 
 ## Runnable examples
 
-[`examples/`](examples/) contains two self-contained, offline walkthroughs: one package that passes, and one whose validly signed *publish* attestation is not build provenance (exit 1). From a clone, with no install and no network:
+[`examples/`](examples/) contains three self-contained, offline walkthroughs: one package that passes, one installed under an npm alias that passes because the policy names the real package, and one whose validly signed *publish* attestation is not build provenance (exit 1). From a clone, with no install and no network:
 
 ```sh
 npm run example
 ```
 
-The runner asserts both documented exit codes, so the examples cannot silently drift. Each directory has its own lockfile, policy, and cache; see [examples/README.md](examples/README.md) for the full output and how to adapt the policy to your own lockfile. The bundles are generated test data, not real registry attestations, and the fixture trust root must not be used in production.
+The runner asserts every documented exit code, so the examples cannot silently drift. Each directory has its own lockfile, policy, and cache; see [examples/README.md](examples/README.md) for the full output and how to adapt the policy to your own lockfile. The bundles are generated test data, not real registry attestations, and the fixture trust root must not be used in production.
 
 ## Quick start: a real check session
 
@@ -152,7 +152,7 @@ An exemption is the only way to make a required package pass without provenance,
 | `sourceRepository` | strongly recommended | Expected upstream repository. Accepts normalized forms such as `https://github.com/org/repo`, `git+https://github.com/org/repo.git`, and `git@github.com:org/repo.git`. If omitted, the gate checks the subject digest and signature but cannot bind the attestation to a repository you trust. |
 | `workflow` | strongly recommended | Expected workflow path, for example `.github/workflows/release.yml`. Matched against both the SLSA statement and the signing certificate's identity. |
 | `ref` | no | Expected git ref, for example `refs/heads/main`. When set, the attestation and certificate identity must agree. |
-| `allowlist` | in allowlist mode | Array of package names or objects. An object may set `name` (or `package`), `version`, `integrity`, and per-package `sourceRepository`, `workflow`, and `ref` overrides. |
+| `allowlist` | in allowlist mode | Array of package names or objects. Prefer the published package name; for an aliased install the local alias is also accepted (see [Do npm aliases work?](#do-npm-aliases-work)). An object may set `name` (or `package`), `version`, `integrity`, and per-package `sourceRepository`, `workflow`, and `ref` overrides. |
 | `exemptions` | no | Array of `{ "package": "...", "version": "...", "reason": "..." }`. `package` and `reason` are required; `version` is optional. |
 | `integrity` | no | In an allowlist entry, pins the exact SRI hash. A lockfile entry whose integrity differs fails with exit 1. |
 | `trustRoot` | no | Path to a Sigstore `trusted_root.json`/PEM file, or an inline trust-root object. Relative paths resolve from the policy file. Defaults to the built-in public-good trust root. |
@@ -169,7 +169,7 @@ If an explicitly allowlisted package is present in the lockfile but excluded by 
 
 For every selected lockfile entry, the tool:
 
-1. Parses `package-lock.json` v1, v2, or v3 and skips links, workspaces, and git/file dependencies that cannot have npm registry provenance.
+1. Parses `package-lock.json` v1, v2, or v3 and skips links, workspaces, and git/file dependencies that cannot have npm registry provenance. An npm alias is resolved to the real package recorded in `packages[*].name` (v2/v3) or in the `npm:` version spec (v1), so an entry installed at `node_modules/cv` for `"cv": "npm:cache-verdict@0.7.0"` is checked as `cache-verdict`.
 2. Resolves the package's npm attestation document, from `--cache` first and otherwise from the registry's attestations endpoint (falling back to a bundle advertised in the package metadata).
 3. Requires a build-provenance predicate. A validly signed npm *publish* attestation is ignored for this policy.
 4. Verifies the DSSE signature over the in-toto statement.
@@ -249,6 +249,33 @@ The receipt also carries `lockfile`, `policy`, `registry`, and `lockfileVersion`
 provenance-gate check package-lock.json --policy provenance.json --cache .provenance-cache
 ```
 
+### Do npm aliases work?
+
+Yes. An npm alias installs a package under a different local name:
+
+```json
+{
+  "dependencies": {
+    "cv": "npm:cache-verdict@0.7.0"
+  }
+}
+```
+
+`package-lock.json` records that alias at `node_modules/cv`, but the entry's `name` field is the real published package (`cache-verdict`). The gate resolves the alias before doing anything else, then looks up the attestation, matches the subject, and reports `cache-verdict`:
+
+```json
+{
+  "mode": "allowlist",
+  "sourceRepository": "https://github.com/WJDdidi-1/cache-verdict",
+  "workflow": ".github/workflows/publish.yml",
+  "allowlist": [
+    { "name": "cache-verdict", "version": "0.7.0" }
+  ]
+}
+```
+
+Prefer the real package name in the policy. Naming the local alias (`cv`) also selects the aliased entry, but the receipt and the attestation always use the real package (`cache-verdict`), so the real name is clearer and survives an alias rename. Either way, the integrity hash binds the verdict to the exact tarball installed under the alias, so a wrong or tampered hash is a mismatch (exit 1). Both `package-lock.json` v1 aliases (where the `npm:` spec is in `version`) and v2/v3 aliases (where `packages[*].name` carries the real name) are handled. The packed-tarball test and [`examples/alias-check`](examples/alias-check) exercise this end to end.
+
 ### Does it need network access?
 
 With `--cache`, an online run fetches attestations that are not already cached and writes the exact Sigstore trust root it used into the cache directory. Later runs with `--offline` and the same cache make no network calls. From a clone, this succeeds offline against the checked-in example and exits 0:
@@ -324,7 +351,7 @@ No. It verifies the Rekor signed entry timestamp (SET) and, when present, its pa
 npm test
 ```
 
-The suite uses Node's built-in test runner and generated fixtures, including a local HTTP server for cache tests. It does not require network access. It also runs the checked-in examples, so their documented exit codes are part of `npm test`. CI runs on Ubuntu, macOS, and Windows with Node 18, 20, and 22, then packs the tarball and installs it in a clean directory to run both binaries with `--version` and `--help`.
+The suite uses Node's built-in test runner and generated fixtures, including a local HTTP server for cache tests. It does not require network access. It also runs the checked-in examples, so their documented exit codes are part of `npm test`, packs the tarball, installs it in a clean directory, and has the installed CLI verify an aliased lockfile (exit 0) and a tampered integrity hash (exit 1). CI runs on Ubuntu, macOS, and Windows with Node 18, 20, and 22, then packs the tarball and installs it in a clean directory to run both binaries with `--version` and `--help`.
 
 ## Status
 

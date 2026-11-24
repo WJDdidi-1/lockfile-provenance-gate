@@ -26,6 +26,15 @@ const cases = [
     expectedSummary: { required: 1, verified: 1, missing: 0, mismatch: 0, error: 0 },
   },
   {
+    label: 'npm alias example: the policy names the real package',
+    dir: 'alias-check',
+    packageName: '@acme/widget',
+    version: '1.2.3',
+    expectedExit: 0,
+    expectedStatus: 'verified',
+    expectedSummary: { required: 1, verified: 1, missing: 0, mismatch: 0, error: 0 },
+  },
+  {
     label: 'expected failure: publish attestation is not build provenance',
     dir: 'publish-only',
     packageName: 'publish-only',

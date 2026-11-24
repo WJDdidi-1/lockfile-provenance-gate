@@ -58,6 +58,181 @@ test('a cached bundle whose subject and source match policy is verified offline'
   assert.match(result.stdout, /1 required, 1 verified, 0 missing, 0 mismatch, 0 error/u);
 });
 
+test('an npm alias is verified under the real package name it installs', () => {
+  const result = runCheck('alias', ['--json']);
+  assert.equal(result.status, 0, result.stderr);
+
+  const receipt = receiptOf(result);
+  // The lockfile installs @acme/widget at node_modules/widget via
+  // "widget": "npm:@acme/widget@1.2.3"; the policy and attestation name the
+  // real package, so that is the package that must be looked up and reported.
+  const widget = rowFor(receipt, '@acme/widget');
+  assert.equal(widget.version, '1.2.3');
+  assert.equal(widget.status, 'verified');
+  assert.equal(widget.verified, true);
+  assert.equal(widget.reason, 'provenance verified');
+  assert.equal(receipt.packages.some((item) => item.package === 'widget'), false);
+});
+
+test('a package-lock v1 npm alias is verified under its real package name', () => {
+  const result = runCheck('alias-v1', ['--json']);
+  assert.equal(result.status, 0, result.stderr);
+  const widget = rowFor(receiptOf(result), '@acme/widget');
+  assert.equal(widget.version, '1.2.3');
+  assert.equal(widget.status, 'verified');
+});
+
+test('a policy may name the local alias and still verifies the real package', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'provenance-gate-alias-policy-'));
+  try {
+    const policyPath = path.join(dir, 'policy.json');
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        mode: 'allowlist',
+        sourceRepository: 'https://github.com/acme/widget',
+        workflow: '.github/workflows/release.yml',
+        trustRoot: path.join(bundles, 'trust-root.json'),
+        allowlist: [{ name: 'widget', version: '1.2.3' }],
+      }),
+    );
+
+    const result = runCheckAt(fixture('alias', 'package-lock.json'), policyPath, ['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    const receipt = receiptOf(result);
+    const widget = rowFor(receipt, '@acme/widget');
+    assert.equal(widget.status, 'verified');
+    // The alias selects the entry; the attestation and the receipt still use
+    // the real package name.
+    assert.equal(receipt.packages.some((item) => item.package === 'widget'), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an alias still selects the package when a direct copy is also installed', () => {
+  // npm can install the same tarball at node_modules/@acme/widget and, through
+  // the alias, at node_modules/widget.  They dedupe to one package, but either
+  // install name must still select it.
+  const result = runCheck('alias-direct', ['--json']);
+  assert.equal(result.status, 0, result.stderr);
+
+  const receipt = receiptOf(result);
+  const widget = rowFor(receipt, '@acme/widget');
+  assert.equal(widget.status, 'verified');
+  assert.equal(receipt.packages.length, 1);
+});
+
+test('an exemption written as the local alias also exempts the real package', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'provenance-gate-alias-exempt-'));
+  try {
+    const policyPath = path.join(dir, 'policy.json');
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        mode: 'allowlist',
+        sourceRepository: 'https://github.com/acme/widget',
+        workflow: '.github/workflows/release.yml',
+        trustRoot: path.join(bundles, 'trust-root.json'),
+        allowlist: [{ name: '@acme/widget', version: '1.2.3' }],
+        exemptions: [{ package: 'widget', version: '1.2.3', reason: 'vendored under the widget alias' }],
+      }),
+    );
+
+    const result = runCheckAt(fixture('alias', 'package-lock.json'), policyPath, ['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    const receipt = receiptOf(result);
+    assert.equal(receipt.packages.length, 0);
+    assert.equal(receipt.summary.exempt, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('mode: all verifies an alias under the real package name', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'provenance-gate-alias-all-'));
+  try {
+    const policyPath = path.join(dir, 'policy.json');
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        mode: 'all',
+        sourceRepository: 'https://github.com/acme/widget',
+        workflow: '.github/workflows/release.yml',
+        trustRoot: path.join(bundles, 'trust-root.json'),
+      }),
+    );
+
+    const result = runCheckAt(fixture('alias', 'package-lock.json'), policyPath, ['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    const receipt = receiptOf(result);
+    // mode: all has no allowlist to name the package, so the lockfile entry
+    // itself must carry the real name into the registry lookup and receipt.
+    const widget = rowFor(receipt, '@acme/widget');
+    assert.equal(widget.status, 'verified');
+    assert.equal(receipt.packages.some((item) => item.package === 'widget'), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('mode: all still verifies a direct dependency under its own name', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'provenance-gate-direct-all-'));
+  try {
+    const policyPath = path.join(dir, 'policy.json');
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        mode: 'all',
+        sourceRepository: 'https://github.com/acme/widget',
+        workflow: '.github/workflows/release.yml',
+        trustRoot: path.join(bundles, 'trust-root.json'),
+      }),
+    );
+
+    const result = runCheckAt(fixture('offline', 'package-lock.json'), policyPath, ['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    const widget = rowFor(receiptOf(result), '@acme/widget');
+    assert.equal(widget.status, 'verified');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an aliased package with the wrong integrity still fails the gate', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'provenance-gate-alias-integrity-'));
+  try {
+    const policyPath = path.join(dir, 'policy.json');
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        mode: 'allowlist',
+        sourceRepository: 'https://github.com/acme/widget',
+        workflow: '.github/workflows/release.yml',
+        trustRoot: path.join(bundles, 'trust-root.json'),
+        allowlist: [
+          {
+            name: '@acme/widget',
+            version: '1.2.3',
+            integrity: WIDGET_INTEGRITY.replace('W3ZD', 'AAAA'),
+          },
+        ],
+      }),
+    );
+
+    const result = runCheckAt(fixture('alias', 'package-lock.json'), policyPath, ['--json']);
+    assert.equal(result.status, 1, result.stderr);
+
+    const receipt = receiptOf(result);
+    const widget = rowFor(receipt, '@acme/widget');
+    assert.equal(widget.status, 'mismatch');
+    assert.equal(widget.verified, false);
+    assert.match(widget.reason, /does not match the integrity pinned by policy/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the JSON receipt carries the verified provenance identity', () => {
   const result = runCheck('offline', ['--json']);
   assert.equal(result.status, 0, result.stderr);
@@ -373,6 +548,68 @@ test('package-lock v3 parsing handles scoped and nested packages and skips links
     parsed.entries.map((entry) => `${entry.name}@${entry.version}`),
     ['@scope/bar@2.0.0', 'foo@1.0.0'],
   );
+});
+
+test('package-lock v3 alias entries expose the real package name and the install name', () => {
+  const parsed = parseLockfile({
+    lockfileVersion: 3,
+    packages: {
+      '': { name: 'root', version: '1.0.0', dependencies: { cv: 'npm:cache-verdict@0.7.0' } },
+      'node_modules/cv': {
+        name: 'cache-verdict',
+        version: '0.7.0',
+        resolved: 'https://registry.npmjs.org/cache-verdict/-/cache-verdict-0.7.0.tgz',
+        integrity: 'sha512-dvziszaWS1gFLFaSdksrOp6kcsgZPJUGMIkmKWbt3bM9zLkJXuF2jGmOnNcPvP97rwvxt/TXmmFjoC3ae21VJg==',
+      },
+    },
+  });
+  assert.deepEqual(
+    parsed.entries.map((entry) => `${entry.installName} -> ${entry.name}@${entry.version}`),
+    ['cv -> cache-verdict@0.7.0'],
+  );
+  assert.equal(parsed.entries[0].aliased, true);
+});
+
+test('package-lock v1 alias entries resolve the package name from the npm: spec', () => {
+  const parsed = parseLockfile({
+    lockfileVersion: 1,
+    requires: true,
+    dependencies: {
+      cv: {
+        version: 'npm:cache-verdict@0.7.0',
+        resolved: 'https://registry.npmjs.org/cache-verdict/-/cache-verdict-0.7.0.tgz',
+        integrity: 'sha512-dvziszaWS1gFLFaSdksrOp6kcsgZPJUGMIkmKWbt3bM9zLkJXuF2jGmOnNcPvP97rwvxt/TXmmFjoC3ae21VJg==',
+      },
+    },
+  });
+  assert.deepEqual(
+    parsed.entries.map((entry) => `${entry.installName} -> ${entry.name}@${entry.version}`),
+    ['cv -> cache-verdict@0.7.0'],
+  );
+  assert.equal(parsed.entries[0].aliased, true);
+});
+
+test('one package installed directly and via alias keeps every install name', () => {
+  const parsed = parseLockfile({
+    lockfileVersion: 3,
+    packages: {
+      '': { name: 'root', version: '1.0.0' },
+      'node_modules/@acme/widget': {
+        version: '1.2.3',
+        resolved: 'https://registry.npmjs.org/@acme/widget/-/widget-1.2.3.tgz',
+        integrity: 'sha512-W3ZDqfRmYOYhjOasZ3pSvK6VJJL9dhNSPAmgtAF51MTLW88dnoGyNVrO6bsw8Ju46DepNLq2admJQKeVbDcNRw==',
+      },
+      'node_modules/widget': {
+        name: '@acme/widget',
+        version: '1.2.3',
+        resolved: 'https://registry.npmjs.org/@acme/widget/-/widget-1.2.3.tgz',
+        integrity: 'sha512-W3ZDqfRmYOYhjOasZ3pSvK6VJJL9dhNSPAmgtAF51MTLW88dnoGyNVrO6bsw8Ju46DepNLq2admJQKeVbDcNRw==',
+      },
+    },
+  });
+  assert.equal(parsed.entries.length, 1);
+  assert.equal(parsed.entries[0].name, '@acme/widget');
+  assert.deepEqual(parsed.entries[0].installNames, ['@acme/widget', 'widget']);
 });
 
 test('policy aliases and explicit integrity pins are accepted', () => {
