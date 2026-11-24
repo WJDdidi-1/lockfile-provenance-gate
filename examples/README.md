@@ -1,6 +1,6 @@
 # Runnable examples
 
-Two self-contained, offline examples of the gate. They need no install and no
+Three self-contained, offline examples of the gate. They need no install and no
 network access: clone the repository, use Node.js 18 or newer, and run them
 from the repository root.
 
@@ -9,15 +9,15 @@ from the repository root.
 > `cache/` directory. Use them to learn the command and the verdict format;
 > never use that trust root for a production policy.
 
-## Run both, with assertions
+## Run all, with assertions
 
 ```sh
 npm run example
 ```
 
-`examples/run-example.mjs` runs the CLI twice (`--offline`), prints each verdict
-and summary, and fails unless the first exits 0 and the second exits 1. The
-tail of its output is:
+`examples/run-example.mjs` runs the CLI three times (`--offline`), prints each
+verdict and summary, and fails unless the first two exit 0 and the third exits
+1. The tail of its output is:
 
 ```console
 1. verified example
@@ -27,14 +27,21 @@ tail of its output is:
    exit: 0 (expected 0)
    PASS
 
-2. expected failure: publish attestation is not build provenance
+2. npm alias example: the policy names the real package
+   ...
+   @acme/widget@1.2.3: verified - provenance verified
+   summary: 1 required, 1 verified, 0 missing, 0 mismatch, 0 error
+   exit: 0 (expected 0)
+   PASS
+
+3. expected failure: publish attestation is not build provenance
    ...
    publish-only@1.0.0: mismatch - no verifiable Sigstore provenance attestation found for publish-only@1.0.0
    summary: 1 required, 0 verified, 0 missing, 1 mismatch, 0 error
    exit: 1 (expected 1)
    PASS
 
-All 2 examples behaved as documented.
+All 3 examples behaved as documented.
 ```
 
 ## Example 1: a package that passes
@@ -79,7 +86,35 @@ policy. The policy names no `trustRoot`, so the offline run reads
 }
 ```
 
-## Example 2: a signed attestation that is the wrong kind
+## Example 2: an npm alias that passes
+
+`examples/alias-check` is the same package installed under a local alias. The
+lockfile records `"widget": "npm:@acme/widget@1.2.3"` as the dependency and
+installs it at `node_modules/widget`, but the entry's `name` is still
+`@acme/widget`. The policy names the real package, so the gate resolves the
+alias, queries the `@acme/widget` attestation, and reports the real name:
+
+```sh
+node bin/provenance-gate.js check examples/alias-check/package-lock.json \
+  --policy examples/alias-check/provenance.json \
+  --cache examples/alias-check/cache \
+  --offline
+```
+
+```console
+PACKAGE       VERSION  INTEGRITY                                                                                        STATUS    REASON
+------------  -------  -----------------------------------------------------------------------------------------------  --------  -------------------
+@acme/widget  1.2.3    sha512-W3ZDqfRmYOYhjOasZ3pSvK6VJJL9dhNSPAmgtAF51MTLW88dnoGyNVrO6bsw8Ju46DepNLq2admJQKeVbDcNRw==  verified  provenance verified
+
+1 required, 1 verified, 0 missing, 0 mismatch, 0 error
+```
+
+The exit code is 0. Prefer the real package name in the policy; naming the
+local alias (`widget`) also selects this entry, but the receipt and attestation
+still use `@acme/widget`. The integrity hash binds the verdict to the exact
+tarball installed under the alias.
+
+## Example 3: a signed attestation that is the wrong kind
 
 `examples/publish-only` is the same shape, but its bundle carries npm's
 *publish* attestation predicate instead of build provenance. A valid signature
@@ -142,6 +177,12 @@ examples/
 ├── offline-check/
 │   ├── package-lock.json
 │   ├── provenance.json
+│   └── cache/
+│       ├── acme_widget@1.2.3.json  # generated build-provenance bundle
+│       └── trusted-root.json       # test-only fixture root
+├── alias-check/
+│   ├── package-lock.json           # installs @acme/widget under node_modules/widget
+│   ├── provenance.json             # names the real package, @acme/widget
 │   └── cache/
 │       ├── acme_widget@1.2.3.json  # generated build-provenance bundle
 │       └── trusted-root.json       # test-only fixture root
