@@ -1,6 +1,6 @@
 {
   "name": "lockfile-provenance-gate",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Gate npm lockfiles on provenance bound to the repo you actually trust.",
   "license": "Apache-2.0",
   "type": "module",
