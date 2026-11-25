@@ -4,6 +4,30 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- A git (`github:`/`git+ssh:`), `file:`, or `link:` lockfile entry is no longer
+  silently dropped from the selected set. `mode: "all"` now reports it with
+  status `unverifiable` and exits 1, because there is no registry tarball,
+  integrity hash, or attestation to bind. A lockfile whose only dependency is a
+  git checkout no longer reports `required: 0, ok: true` and exit 0. In a mixed
+  lockfile, an unverifiable checkout of a package that is also installed from
+  the registry is reported beside the verified row instead of being merged away
+  behind it, so `npm ci` cannot install code the receipt never mentions.
+  - The JSON receipt summary gains `summary.unverifiable`; `summary.required`
+    counts every selected entry. The table only names the unverifiable count
+    when it is non-zero, keeping the registry-only summary unchanged.
+  - An exemption with a non-empty reason remains the explicit way to accept an
+    unverifiable entry: it counts in `summary.exempt` and exits 0.
+  - `npm test` now packs the tarball, installs it into a clean temporary prefix,
+    and runs the installed CLI on a git-only lockfile (unverifiable row, exit 1),
+    a mixed registry-plus-git lockfile (verified row plus unverifiable row, exit
+    1), a registry-only control (exit 0), and a git-only lockfile with an
+    exemption (exit 0). Each installed-CLI receipt is compared with the
+    checkout CLI's receipt on the same fixtures. README documents the
+    `unverifiable` status, the summary field, the exemption path, and the
+    exit-code change.
+
 ## 0.2.0 - 2026-11-24
 
 ### Fixed
