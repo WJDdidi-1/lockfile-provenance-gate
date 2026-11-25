@@ -270,6 +270,7 @@ test('the JSON receipt carries the verified provenance identity', () => {
     verified: 1,
     missing: 0,
     mismatch: 0,
+    unverifiable: 0,
     error: 0,
     exempt: 0,
   });
@@ -330,6 +331,7 @@ test('a required package with no cached bundle is missing, not unverified', () =
     verified: 0,
     missing: 2,
     mismatch: 0,
+    unverifiable: 0,
     error: 0,
     exempt: 0,
   });
@@ -490,6 +492,132 @@ test('a lockfile entry with no integrity hash is a policy mismatch', () => {
   assert.match(item.reason, /has no integrity hash to bind provenance to/u);
 });
 
+test('a git-only lockfile is unverifiable, not an empty passing requirement set', () => {
+  const result = runCheck('unverifiable-git', ['--json']);
+  assert.equal(result.status, 1, result.stderr);
+
+  const receipt = receiptOf(result);
+  assert.equal(receipt.ok, false);
+  assert.equal(receipt.exitCode, 1);
+  const item = rowFor(receipt, 'loud-cron');
+  assert.equal(item.status, 'unverifiable');
+  assert.equal(item.verified, false);
+  assert.equal(item.sourceType, 'git');
+  assert.match(item.resolved, /^git\+ssh:\/\/git@github\.com\/WJDdidi-1\/loud-cron\.git#/u);
+  assert.match(item.reason, /git dependency resolved from git\+ssh:\/\//u);
+  assert.match(item.reason, /no registry integrity hash or provenance/u);
+  assert.deepEqual(receipt.summary, {
+    required: 1,
+    verified: 0,
+    missing: 0,
+    mismatch: 0,
+    unverifiable: 1,
+    error: 0,
+    exempt: 0,
+  });
+});
+
+test('the table names the resolved source of an unverifiable entry', () => {
+  const result = runCheck('unverifiable-git');
+  assert.equal(result.status, 1, result.stderr);
+  const rows = result.stdout
+    .split('\n')
+    .filter((line) => line.includes('loud-cron') && !line.startsWith('PACKAGE'));
+  assert.equal(rows.length, 1, result.stdout);
+  assert.match(rows[0], /\bunverifiable\b/u);
+  assert.match(rows[0], /git\+ssh:\/\/git@github\.com\/WJDdidi-1\/loud-cron\.git#/u);
+  assert.match(result.stdout, /1 required, 0 verified, 0 missing, 0 mismatch, 0 error, 1 unverifiable/u);
+});
+
+test('a git checkout of a registry package is reported beside the verified copy', () => {
+  const result = runCheck('unverifiable-mixed', ['--json']);
+  assert.equal(result.status, 1, result.stderr);
+
+  const receipt = receiptOf(result);
+  const rows = receipt.packages.filter((item) => item.package === '@acme/widget');
+  assert.equal(rows.length, 2, JSON.stringify(receipt.packages, null, 2));
+  const verified = rows.find((item) => item.status === 'verified');
+  const unverifiable = rows.find((item) => item.status === 'unverifiable');
+  assert.equal(verified?.version, '1.2.3');
+  assert.equal(unverifiable?.version, '1.2.3');
+  assert.equal(unverifiable?.sourceType, 'git');
+  assert.match(unverifiable?.resolved ?? '', /^git\+ssh:\/\/git@github\.com\/acme\/widget\.git#/u);
+  assert.deepEqual(receipt.summary, {
+    required: 2,
+    verified: 1,
+    missing: 0,
+    mismatch: 0,
+    unverifiable: 1,
+    error: 0,
+    exempt: 0,
+  });
+});
+
+test('a file: dependency is reported as an unverifiable link with its version', () => {
+  const result = runCheck('unverifiable-link', ['--json']);
+  assert.equal(result.status, 1, result.stderr);
+
+  const receipt = receiptOf(result);
+  const item = rowFor(receipt, 'localpkg');
+  assert.equal(item.version, '1.2.3');
+  assert.equal(item.status, 'unverifiable');
+  assert.equal(item.sourceType, 'link');
+  assert.equal(item.resolved, '../localpkg');
+  assert.match(item.reason, /link dependency resolved from \.\.\/localpkg/u);
+  assert.equal(receipt.summary.unverifiable, 1);
+});
+
+test('an allowlisted package that is only unverifiable says it is present but cannot be verified', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'provenance-gate-unverifiable-allowlist-'));
+  try {
+    const policyPath = path.join(dir, 'policy.json');
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        mode: 'allowlist',
+        allowlist: [{ name: 'loud-cron', version: '0.1.0' }],
+      }),
+    );
+
+    const result = runCheckAt(fixture('unverifiable-git', 'package-lock.json'), policyPath, ['--json']);
+    assert.equal(result.status, 1, result.stderr);
+
+    const receipt = receiptOf(result);
+    const item = rowFor(receipt, 'loud-cron');
+    assert.equal(item.status, 'unverifiable');
+    assert.match(item.reason, /present in the lockfile but cannot be verified/u);
+    assert.doesNotMatch(item.reason, /not present in the lockfile/u);
+    assert.equal(receipt.summary.unverifiable, 1);
+    assert.equal(receipt.summary.missing, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an exemption with a reason makes an unverifiable entry pass explicitly', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'provenance-gate-unverifiable-exempt-'));
+  try {
+    const policyPath = path.join(dir, 'policy.json');
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        mode: 'allowlist',
+        allowlist: [{ name: 'loud-cron' }],
+        exemptions: [{ package: 'loud-cron', reason: 'hand-reviewed git checkout' }],
+      }),
+    );
+
+    const result = runCheckAt(fixture('unverifiable-git', 'package-lock.json'), policyPath, ['--json']);
+    assert.equal(result.status, 0, result.stderr);
+    const receipt = receiptOf(result);
+    assert.equal(receipt.packages.length, 0);
+    assert.equal(receipt.summary.exempt, 1);
+    assert.equal(receipt.summary.unverifiable, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a policy integrity pin that does not match the lockfile exits 1 with mismatch', () => {
   const result = runCheck('mismatch');
   assert.equal(result.status, 1, result.stderr);
@@ -533,7 +661,7 @@ test('an inline policy trust root is parsed without touching the filesystem', ()
   assert.equal(trustRoot.tlogs.length, 1);
 });
 
-test('package-lock v3 parsing handles scoped and nested packages and skips links', () => {
+test('package-lock v3 parsing handles scoped and nested packages and reports links', () => {
   const parsed = parseLockfile({
     lockfileVersion: 3,
     packages: {
@@ -545,9 +673,65 @@ test('package-lock v3 parsing handles scoped and nested packages and skips links
     },
   });
   assert.deepEqual(
-    parsed.entries.map((entry) => `${entry.name}@${entry.version}`),
-    ['@scope/bar@2.0.0', 'foo@1.0.0'],
+    parsed.entries.map((entry) => `${entry.name}@${entry.version}:${entry.kind}`),
+    ['@scope/bar@2.0.0:registry', 'foo@1.0.0:registry', 'linked@1.0.0:unverifiable'],
   );
+  const linked = parsed.entries.find((entry) => entry.name === 'linked');
+  assert.equal(linked.sourceType, 'link');
+  assert.equal(linked.resolved, '../linked');
+});
+
+test('a v3 link takes the version from the package entry it points at', () => {
+  const parsed = parseLockfile({
+    lockfileVersion: 3,
+    packages: {
+      '': { name: 'root', version: '1.0.0' },
+      'packages/workspace': { name: '@scope/workspace', version: '2.3.4' },
+      'node_modules/@scope/workspace': { resolved: 'packages/workspace', link: true },
+    },
+  });
+  assert.equal(parsed.entries.length, 1);
+  assert.equal(parsed.entries[0].name, '@scope/workspace');
+  assert.equal(parsed.entries[0].version, '2.3.4');
+  assert.equal(parsed.entries[0].kind, 'unverifiable');
+  assert.equal(parsed.entries[0].sourceType, 'link');
+});
+
+test('package-lock v1 git and file specs are kept as unverifiable, not version strings', () => {
+  const parsed = parseLockfile({
+    lockfileVersion: 1,
+    requires: true,
+    dependencies: {
+      gitdep: {
+        version: 'git+ssh://git@github.com/org/repo.git#abcdef',
+        from: 'gitdep@github:org/repo',
+      },
+      localdep: { version: 'file:../localdep' },
+    },
+  });
+  assert.deepEqual(
+    parsed.entries.map((entry) => `${entry.name}:${entry.version}:${entry.kind}:${entry.sourceType}`),
+    ['gitdep:null:unverifiable:git', 'localdep:null:unverifiable:file'],
+  );
+  assert.match(parsed.entries[0].resolved, /^git\+ssh:\/\/git@github\.com\/org\/repo\.git#/u);
+  assert.equal(parsed.entries[1].resolved, 'file:../localdep');
+});
+
+test('a v3 file tarball entry is unverifiable rather than a registry package', () => {
+  const parsed = parseLockfile({
+    lockfileVersion: 3,
+    packages: {
+      '': { name: 'root', version: '1.0.0' },
+      'node_modules/archive': {
+        version: '4.5.6',
+        resolved: 'file:../vendor/archive-4.5.6.tgz',
+      },
+    },
+  });
+  assert.equal(parsed.entries.length, 1);
+  assert.equal(parsed.entries[0].kind, 'unverifiable');
+  assert.equal(parsed.entries[0].sourceType, 'file');
+  assert.equal(parsed.entries[0].version, '4.5.6');
 });
 
 test('package-lock v3 alias entries expose the real package name and the install name', () => {
