@@ -85,6 +85,23 @@ $ echo $?
 1
 ```
 
+A git, `file:`, or `link:` dependency cannot be bound to a registry attestation. It is not skipped: the entry is selected, reported as `unverifiable`, and fails the gate unless the policy exempts it explicitly:
+
+```console
+$ node bin/provenance-gate.js check test/fixtures/unverifiable-git/package-lock.json \
+    --policy test/fixtures/unverifiable-git/policy.json \
+    --cache test/fixtures/bundles \
+    --offline
+
+PACKAGE    VERSION  INTEGRITY  STATUS        REASON
+---------  -------  ---------  ------------  ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+loud-cron  0.1.0    -          unverifiable  lockfile entry loud-cron@0.1.0 cannot be verified: it is a git dependency resolved from git+ssh://git@github.com/WJDdidi-1/loud-cron.git#f8c54287bfb916d083f8e814a086f1a83aee26c3 and has no registry integrity hash or provenance
+
+1 required, 0 verified, 0 missing, 0 mismatch, 0 error, 1 unverifiable
+$ echo $?
+1
+```
+
 For a real project, point it at your own lockfile and policy:
 
 ```sh
@@ -112,7 +129,7 @@ provenance-gate check package-lock.json --policy provenance.json --cache .proven
 
 There are two modes:
 
-- `"mode": "all"` requires every selected registry package in the lockfile to carry provenance matching the expected source. Use it when the whole tree comes from one trusted upstream, or pair it with `exemptions` for the remainder.
+- `"mode": "all"` requires every selected lockfile entry to carry provenance matching the expected source. Registry packages must be attested; git (`github:`/`git+ssh:`), `file:`, and `link:` dependencies have no registry tarball or integrity hash to bind an attestation to, so they are reported as `unverifiable` and fail with exit 1 instead of being dropped from the requirement set. Use it when the whole tree comes from one trusted upstream, or pair it with `exemptions` for the remainder.
 - `"mode": "allowlist"` requires provenance only for the named packages. Packages outside the allowlist are not checked. Use per-package overrides when the allowlisted packages come from different repositories.
 
 A fuller allowlist policy, including a per-package override and an explicit exemption:
@@ -142,7 +159,7 @@ A fuller allowlist policy, including a per-package override and an explicit exem
 }
 ```
 
-An exemption is the only way to make a required package pass without provenance, and it must give a reason. The reason is not just documentation: a policy that exempts a package without one is rejected.
+An exemption is the only way to make a required package pass without provenance, and it must give a reason. The reason is not just documentation: a policy that exempts a package without one is rejected. The same explicit exemption is how you accept a git, `file:`, or `link:` dependency that cannot carry registry provenance.
 
 ### Policy fields
 
@@ -169,7 +186,7 @@ If an explicitly allowlisted package is present in the lockfile but excluded by 
 
 For every selected lockfile entry, the tool:
 
-1. Parses `package-lock.json` v1, v2, or v3 and skips links, workspaces, and git/file dependencies that cannot have npm registry provenance. An npm alias is resolved to the real package recorded in `packages[*].name` (v2/v3) or in the `npm:` version spec (v1), so an entry installed at `node_modules/cv` for `"cv": "npm:cache-verdict@0.7.0"` is checked as `cache-verdict`.
+1. Parses `package-lock.json` v1, v2, or v3. Registry packages are checked for provenance. Git (`github:`, `git+ssh:`), `file:`, and `link:` dependencies have no registry tarball or integrity hash; they are selected and reported as `unverifiable` rather than skipped, so `npm ci` cannot install code the receipt never mentions. An npm alias is resolved to the real package recorded in `packages[*].name` (v2/v3) or in the `npm:` version spec (v1), so an entry installed at `node_modules/cv` for `"cv": "npm:cache-verdict@0.7.0"` is checked as `cache-verdict`.
 2. Resolves the package's npm attestation document, from `--cache` first and otherwise from the registry's attestations endpoint (falling back to a bundle advertised in the package metadata).
 3. Requires a build-provenance predicate. A validly signed npm *publish* attestation is ignored for this policy.
 4. Verifies the DSSE signature over the in-toto statement.
@@ -177,6 +194,8 @@ For every selected lockfile entry, the tool:
 6. Verifies the Rekor signed entry timestamp (SET) and, when present, its payload hash against the DSSE payload. It does not fetch or verify a full Merkle inclusion proof.
 7. Matches the signed subject name, version, and digest against the lockfile entry and its integrity hash.
 8. Matches the attestation source repository and workflow against the policy, and requires the signing certificate's URI identity to agree.
+
+A git, `file:`, or `link:` entry stops at step 1 with status `unverifiable`: there is no registry tarball, integrity hash, or attestation to bind, and the receipt names the resolved source instead. That is a policy failure (exit 1), not an execution error, and an exemption with a reason is the explicit way to accept it.
 
 A mismatch in any of these steps is a policy failure (exit 1), while malformed input, an unreadable cache, an unreachable registry, or a signature/certificate verification failure is an error (exit 2). The distinction matters in CI: exit 1 means "this package does not meet the policy"; exit 2 means "the gate could not complete its work."
 
@@ -210,6 +229,7 @@ Add `--json` to get a machine-readable receipt on stdout:
     "verified": 1,
     "missing": 0,
     "mismatch": 0,
+    "unverifiable": 0,
     "error": 0,
     "exempt": 0
   },
@@ -229,14 +249,56 @@ Add `--json` to get a machine-readable receipt on stdout:
 }
 ```
 
-The receipt also carries `lockfile`, `policy`, `registry`, and `lockfileVersion`; each package row includes `status` (`verified`, `mismatch`, `missing`, or `error`), `verified`, `reason`, and the cache provenance fields when applicable.
+The receipt also carries `lockfile`, `policy`, `registry`, and `lockfileVersion`. Each package row includes `status`, `verified`, `reason`, and the cache provenance fields when applicable.
+
+### Package statuses
+
+| `status` | Meaning |
+| --- | --- |
+| `verified` | A build-provenance attestation matched the lockfile subject digest, expected source repository, and expected workflow. |
+| `mismatch` | A bundle was found, but its digest, source repository, workflow, or policy integrity pin did not match. |
+| `missing` | No attestation bundle was available, or a required package was absent from the lockfile. |
+| `unverifiable` | A git (`github:`/`git+ssh:`), `file:`, or `link:` dependency with no registry tarball or integrity hash to bind provenance to. The row names the resolved source in `sourceType` and `resolved`. |
+| `error` | The gate could not complete verification: a corrupt cache, a bad signature or certificate chain, an unsupported digest, or a registry failure. |
+
+`summary.required` counts every selected entry, including `unverifiable` ones. `summary.unverifiable` counts the git, `file:`, and `link:` entries the gate could not bind to a registry tarball, and `summary.exempt` counts entries the policy explicitly excused. The run returns `ok: true` and exit 0 only when every selected entry is verified or exempted.
+
+A git-only lockfile therefore produces a failing receipt instead of an empty passing one:
+
+```json
+{
+  "ok": false,
+  "exitCode": 1,
+  "summary": {
+    "required": 1,
+    "verified": 0,
+    "missing": 0,
+    "mismatch": 0,
+    "unverifiable": 1,
+    "error": 0,
+    "exempt": 0
+  },
+  "packages": [
+    {
+      "package": "loud-cron",
+      "version": "0.1.0",
+      "integrity": null,
+      "status": "unverifiable",
+      "verified": false,
+      "sourceType": "git",
+      "resolved": "git+ssh://git@github.com/WJDdidi-1/loud-cron.git#f8c54287bfb916d083f8e814a086f1a83aee26c3",
+      "reason": "lockfile entry loud-cron@0.1.0 cannot be verified: it is a git dependency resolved from git+ssh://... and has no registry integrity hash or provenance"
+    }
+  ]
+}
+```
 
 ### Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Every required package verified against the policy, or was explicitly exempted. |
-| `1` | Policy failure: missing attestation, digest mismatch, integrity-pin mismatch, or source repository/workflow mismatch. |
+| `0` | Every required entry verified against the policy, or was explicitly exempted. |
+| `1` | Policy failure: missing attestation, an unverifiable git/`file:`/`link:` entry, digest mismatch, integrity-pin mismatch, or source repository/workflow mismatch. |
 | `2` | The check could not complete: malformed input, corrupt cache, unreachable registry, or signature/certificate verification failure. |
 
 ## FAQ
@@ -324,6 +386,22 @@ Add an exemption with a non-empty `reason`. In allowlist mode, list the package 
 
 Exempt requirements count in `summary.exempt` and exit 0; they do not print a verdict row.
 
+A git, `file:`, or `link:` dependency is selected as `unverifiable` and exits 1 even in `mode: "all"`. Exempt it by name; the written reason is the explicit record of that risk decision:
+
+```json
+{
+  "mode": "all",
+  "exemptions": [
+    {
+      "package": "loud-cron",
+      "reason": "Pinned git checkout; commit f8c5428 reviewed 2026-11-26"
+    }
+  ]
+}
+```
+
+That receipt has no verdict rows, `summary.exempt: 1`, and exit 0. The packed-tarball test pins this path alongside the failing git-only and mixed lockfiles.
+
 ### Can it block `npm ci`?
 
 Not through an npm lifecycle hook. It is a separate CLI, so run it as a step before install, or chain it so the exit code stops the job:
@@ -332,7 +410,7 @@ Not through an npm lifecycle hook. It is a separate CLI, so run it as a step bef
 provenance-gate check package-lock.json --policy provenance.json --cache .provenance-cache --offline && npm ci
 ```
 
-Exit `1` means a package does not meet the policy; exit `2` means the gate could not complete. The gate never installs, unpacks, or executes the audited packages.
+Exit `1` means an entry does not meet the policy, including an unverifiable git/`file:`/`link:` entry; exit `2` means the gate could not complete. The gate never installs, unpacks, or executes the audited packages.
 
 ### Does it verify a full Rekor inclusion proof?
 
@@ -343,7 +421,7 @@ No. It verifies the Rekor signed entry timestamp (SET) and, when present, its pa
 - Provenance is only as strong as the trust root and policy you supply. Set `sourceRepository` and `workflow`; without them the gate still verifies that a valid attestation covers the lockfile digest, but it cannot tell you *who* built it.
 - The bundle must chain to a configured Sigstore root. The package ships the public-good root; the test fixture trust root is test-only and must never be used in production.
 - The tool does not install, execute, or unpack the audited tarballs. It does read registry attestation metadata for the exact lockfile version.
-- npm provenance is not universal. Required packages without it fail; exempt them deliberately with a reason if that is the right risk decision for your project.
+- npm provenance is not universal. Required registry packages without it fail, and git, `file:`, and `link:` entries fail as `unverifiable`; exempt them deliberately with a reason if that is the right risk decision for your project.
 
 ## Development
 
@@ -351,7 +429,7 @@ No. It verifies the Rekor signed entry timestamp (SET) and, when present, its pa
 npm test
 ```
 
-The suite uses Node's built-in test runner and generated fixtures, including a local HTTP server for cache tests. It does not require network access. It also runs the checked-in examples, so their documented exit codes are part of `npm test`, packs the tarball, installs it in a clean directory, and has the installed CLI verify an aliased project (exit 0) both when the policy names the real package and when it names the local alias, then report a tampered integrity hash as a mismatch (exit 1). CI runs on Ubuntu, macOS, and Windows with Node 18, 20, and 22, then packs the tarball and installs it in a clean directory to run both binaries with `--version` and `--help`.
+The suite uses Node's built-in test runner and generated fixtures, including a local HTTP server for cache tests. It does not require network access. It also runs the checked-in examples, so their documented exit codes are part of `npm test`, packs the tarball, installs it in a clean directory, and has the installed CLI verify an aliased project (exit 0) both when the policy names the real package and when it names the local alias, then report a tampered integrity hash as a mismatch (exit 1). The packed CLI is also run on a git-only lockfile (one `unverifiable` row and exit 1), a mixed registry-plus-git lockfile (a verified row beside an `unverifiable` row, exit 1), a registry-only control (exit 0), and a git-only lockfile with an exemption (exit 0), and each receipt is compared with the checkout's receipt on the same fixtures. CI runs on Ubuntu, macOS, and Windows with Node 18, 20, and 22, then packs the tarball and installs it in a clean directory to run both binaries with `--version` and `--help`.
 
 ## Status
 
