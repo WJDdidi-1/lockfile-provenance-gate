@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.3.0 - 2026-11-25
+
 ### Fixed
 
 - A git (`github:`/`git+ssh:`), `file:`, or `link:` lockfile entry is no longer
